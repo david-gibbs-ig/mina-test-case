@@ -89,6 +89,7 @@ public class Producer {
 					for (int i = 0; i < 100000; ++i) {
 						System.out.println("scheduled write messages " + session.getScheduledWriteMessages());
 						System.out.println("scheduled write bytes " + session.getScheduledWriteBytes());
+						System.out.println("scheduled write request queue size " + session.getWriteRequestQueue().size());
 						System.out.println("in writer : writing " + i);
 						News news = new News();
 						news.set(new Headline("Headline : " + Integer.toString(i)));
