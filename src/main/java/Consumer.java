@@ -31,7 +31,6 @@ import org.apache.mina.core.future.ConnectFuture;
 import org.apache.mina.core.service.IoHandlerAdapter;
 import org.apache.mina.core.session.IoSession;
 import org.apache.mina.filter.codec.ProtocolCodecFilter;
-import org.apache.mina.filter.codec.textline.TextLineCodecFactory;
 import org.apache.mina.filter.logging.LoggingFilter;
 import org.apache.mina.filter.logging.MdcInjectionFilter;
 import org.apache.mina.transport.socket.nio.NioSocketConnector;
@@ -50,14 +49,12 @@ public class Consumer {
 
     public static void main(String[] args) throws Exception {
     	ConsumerProtocolHandler consumer = new Consumer.ConsumerProtocolHandler();
-
-    	ProtocolCodecFilter textLineCodecFilter = new ProtocolCodecFilter(new TextLineCodecFactory());
          
         ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new FIXProtocolCodecFactory());
         
         NioSocketConnector connector = new NioSocketConnector();
         connector.getFilterChain().addLast("mdc", new MdcInjectionFilter());
-        connector.getFilterChain().addLast("codec", textLineCodecFilter);
+        connector.getFilterChain().addLast("codec", fixCodecFilter);
         connector.getFilterChain().addLast("logger", new LoggingFilter());
 
         connector.setHandler(consumer);
@@ -70,7 +67,7 @@ public class Consumer {
         News news = new News();
         news.set(new Headline("headline"));
         for (IoSession session: connector.getManagedSessions().values()) {
-        	session.write(news.toString());
+        	session.write(news);
         }
     }
     

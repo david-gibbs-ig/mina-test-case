@@ -32,7 +32,6 @@ import org.apache.mina.core.filterchain.DefaultIoFilterChainBuilder;
 import org.apache.mina.core.service.IoHandlerAdapter;
 import org.apache.mina.core.session.IoSession;
 import org.apache.mina.filter.codec.ProtocolCodecFilter;
-import org.apache.mina.filter.codec.textline.TextLineCodecFactory;
 import org.apache.mina.filter.logging.LoggingFilter;
 import org.apache.mina.filter.logging.MdcInjectionFilter;
 import org.apache.mina.transport.socket.nio.NioSocketAcceptor;
@@ -54,11 +53,10 @@ public class Producer {
 
         MdcInjectionFilter mdcInjectionFilter = new MdcInjectionFilter();
         ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new FIXProtocolCodecFactory());
-        ProtocolCodecFilter textLineCodecFilter = new ProtocolCodecFilter(new TextLineCodecFactory());
 
         DefaultIoFilterChainBuilder chain = acceptor.getFilterChain();
         chain.addLast("mdc", mdcInjectionFilter);
-        chain.addLast("codec", textLineCodecFilter);
+        chain.addLast("codec", fixCodecFilter);
 		chain.addLast("logger", new LoggingFilter());
 
         ProducerProtocolHandler writer = new Producer.ProducerProtocolHandler();
@@ -96,9 +94,8 @@ public class Producer {
     					News news = new News();
     					news.set(new Headline("Headline : " + Integer.toString(i)));
     					try {
-    						session.write(news.toString()).await(10);
+    						session.write(news).await(10);
     					} catch (InterruptedException e) {
-    						// TODO Auto-generated catch block
     						e.printStackTrace();
     					}
     				}
