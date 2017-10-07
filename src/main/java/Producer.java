@@ -20,7 +20,6 @@
  *
  */
 
-
 import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.HashSet;
@@ -45,70 +44,70 @@ import quickfix.mina.message.FIXProtocolCodecFactory;
  * @author <a href="http://mina.apache.org">Apache MINA Project</a>
  */
 public class Producer {
-    /** Choose your favorite port number. */
-    private static final int PORT = 1234;
+	/** Choose your favorite port number. */
+	private static final int PORT = 1234;
 
-    public static void main(String[] args) throws Exception {
-        NioSocketAcceptor acceptor = new NioSocketAcceptor();
+	public static void main(String[] args) throws Exception {
+		NioSocketAcceptor acceptor = new NioSocketAcceptor();
 
-        MdcInjectionFilter mdcInjectionFilter = new MdcInjectionFilter();
-        ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new FIXProtocolCodecFactory());
+		MdcInjectionFilter mdcInjectionFilter = new MdcInjectionFilter();
+		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new FIXProtocolCodecFactory());
 
-        DefaultIoFilterChainBuilder chain = acceptor.getFilterChain();
-        chain.addLast("mdc", mdcInjectionFilter);
-        chain.addLast("codec", fixCodecFilter);
+		DefaultIoFilterChainBuilder chain = acceptor.getFilterChain();
+		chain.addLast("mdc", mdcInjectionFilter);
+		chain.addLast("codec", fixCodecFilter);
 		chain.addLast("logger", new LoggingFilter());
 
-        ProducerProtocolHandler writer = new Producer.ProducerProtocolHandler();
+		ProducerProtocolHandler writer = new Producer.ProducerProtocolHandler();
 
-        acceptor.setHandler(writer);
-        acceptor.bind(new InetSocketAddress(PORT));
-        System.out.println("Listening on port " + PORT);
-    }
+		acceptor.setHandler(writer);
+		acceptor.bind(new InetSocketAddress(PORT));
+		System.out.println("Listening on port " + PORT);
+	}
 
-    static class ProducerProtocolHandler extends IoHandlerAdapter {
-    	private final Set<IoSession> sessions = Collections.synchronizedSet(new HashSet<IoSession>());
-    	private final ExecutorService exec = Executors.newSingleThreadExecutor();
+	static class ProducerProtocolHandler extends IoHandlerAdapter {
+		private final Set<IoSession> sessions = Collections.synchronizedSet(new HashSet<IoSession>());
+		private final ExecutorService exec = Executors.newSingleThreadExecutor();
 
-    	@Override
-    	public void exceptionCaught(IoSession session, Throwable cause) {
-    		System.out.println("Unexpected exception." + cause);
-    		// Close connection when unexpected exception is caught.
-    		session.closeNow();
-    	}
+		@Override
+		public void exceptionCaught(IoSession session, Throwable cause) {
+			System.out.println("Unexpected exception." + cause);
+			// Close connection when unexpected exception is caught.
+			session.closeNow();
+		}
 
-    	@Override
-    	public void messageReceived(IoSession session, Object message) {
-    		System.out.println("received: " + message);
-    		sessions.add(session);
-    		// session.suspendWrite();
-    		Runnable r = new Runnable() {
+		@Override
+		public void messageReceived(IoSession session, Object message) {
+			System.out.println("received: " + message);
+			sessions.add(session);
+			// session.suspendWrite();
+			Runnable r = new Runnable() {
 
-    			@Override
-    			public void run() {
-    				//session.suspendWrite();
-    				for (int i = 0; i < 100000; ++i) {
-    					System.out.println("scheduled write messages " + session.getScheduledWriteMessages());
-    					System.out.println("scheduled write bytes " + session.getScheduledWriteBytes());
-    					System.out.println("in writer : writing " + i);
-    					News news = new News();
-    					news.set(new Headline("Headline : " + Integer.toString(i)));
-    					try {
-    						session.write(news).await(10);
-    					} catch (InterruptedException e) {
-    						e.printStackTrace();
-    					}
-    				}
-    			}
-    		};
-    		exec.submit(r);		
-    	}
+				@Override
+				public void run() {
+					// session.suspendWrite();
+					for (int i = 0; i < 100000; ++i) {
+						System.out.println("scheduled write messages " + session.getScheduledWriteMessages());
+						System.out.println("scheduled write bytes " + session.getScheduledWriteBytes());
+						System.out.println("in writer : writing " + i);
+						News news = new News();
+						news.set(new Headline("Headline : " + Integer.toString(i)));
+						try {
+							session.write(news).await(10);
+						} catch (InterruptedException e) {
+							e.printStackTrace();
+						}
+					}
+				}
+			};
+			exec.submit(r);
+		}
 
-    	@Override
-    	public void sessionClosed(IoSession session) throws Exception {
-    		sessions.remove(session);
-    	}
+		@Override
+		public void sessionClosed(IoSession session) throws Exception {
+			sessions.remove(session);
+		}
 
-    }
+	}
 
 }

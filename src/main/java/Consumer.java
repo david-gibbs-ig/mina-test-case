@@ -20,7 +20,6 @@
  *
  */
 
-
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Collections;
@@ -44,55 +43,54 @@ import quickfix.mina.message.FIXProtocolCodecFactory;
  * @author <a href="http://mina.apache.org">Apache MINA Project</a>
  */
 public class Consumer {
-    /** Choose your favorite port number. */
-    private static final int PORT = 1234;
+	/** Choose your favorite port number. */
+	private static final int PORT = 1234;
 
-    public static void main(String[] args) throws Exception {
-    	ConsumerProtocolHandler consumer = new Consumer.ConsumerProtocolHandler();
-         
-        ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new FIXProtocolCodecFactory());
-        
-        NioSocketConnector connector = new NioSocketConnector();
-        connector.getFilterChain().addLast("mdc", new MdcInjectionFilter());
-        connector.getFilterChain().addLast("codec", fixCodecFilter);
-        connector.getFilterChain().addLast("logger", new LoggingFilter());
+	public static void main(String[] args) throws Exception {
+		ConsumerProtocolHandler consumer = new Consumer.ConsumerProtocolHandler();
 
-        connector.setHandler(consumer);
+		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new FIXProtocolCodecFactory());
+
+		NioSocketConnector connector = new NioSocketConnector();
+		connector.getFilterChain().addLast("mdc", new MdcInjectionFilter());
+		connector.getFilterChain().addLast("codec", fixCodecFilter);
+		connector.getFilterChain().addLast("logger", new LoggingFilter());
+
+		connector.setHandler(consumer);
 		ConnectFuture future1 = connector.connect(new InetSocketAddress(InetAddress.getLocalHost(), PORT));
-        future1.awaitUninterruptibly();
-        System.out.println("done waiting");
-        if (!future1.isConnected()) {
-            return;
-        }
-        News news = new News();
-        news.set(new Headline("headline"));
-        for (IoSession session: connector.getManagedSessions().values()) {
-        	session.write(news);
-        }
-    }
-    
-    static class ConsumerProtocolHandler extends IoHandlerAdapter {
-        private final Set<IoSession> sessions = Collections
-                .synchronizedSet(new HashSet<IoSession>());
+		future1.awaitUninterruptibly();
+		System.out.println("done waiting");
+		if (!future1.isConnected()) {
+			return;
+		}
+		News news = new News();
+		news.set(new Headline("headline"));
+		for (IoSession session : connector.getManagedSessions().values()) {
+			session.write(news);
+		}
+	}
 
-        @Override
-        public void exceptionCaught(IoSession session, Throwable cause) {
-        	System.out.println("Unexpected exception." + cause);
-            // Close connection when unexpected exception is caught.
-            session.closeNow();
-        }
+	static class ConsumerProtocolHandler extends IoHandlerAdapter {
+		private final Set<IoSession> sessions = Collections.synchronizedSet(new HashSet<IoSession>());
 
-        @Override
-        public void messageReceived(IoSession session, Object message) {
-        	System.out.println("received: " + message);
-                    sessions.add(session);
-        }
+		@Override
+		public void exceptionCaught(IoSession session, Throwable cause) {
+			System.out.println("Unexpected exception." + cause);
+			// Close connection when unexpected exception is caught.
+			session.closeNow();
+		}
 
-        @Override
-        public void sessionClosed(IoSession session) throws Exception {
-            sessions.remove(session);
-        }
+		@Override
+		public void messageReceived(IoSession session, Object message) {
+			System.out.println("received: " + message);
+			sessions.add(session);
+		}
 
-    }
+		@Override
+		public void sessionClosed(IoSession session) throws Exception {
+			sessions.remove(session);
+		}
+
+	}
 
 }
