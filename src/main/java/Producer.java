@@ -20,6 +20,7 @@
  *
  */
 
+import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.HashSet;
@@ -44,12 +45,10 @@ import quickfix.mina.message.FIXProtocolCodecFactory;
  * @author <a href="http://mina.apache.org">Apache MINA Project</a>
  */
 public class Producer {
-	/** Choose your favorite port number. */
-	private static final int PORT = 1234;
+	public static final int DEFAULT_PORT = 1234;
+	private final NioSocketAcceptor acceptor = new NioSocketAcceptor();
 
-	public static void main(String[] args) throws Exception {
-		NioSocketAcceptor acceptor = new NioSocketAcceptor();
-
+	public Producer() {
 		MdcInjectionFilter mdcInjectionFilter = new MdcInjectionFilter();
 		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new FIXProtocolCodecFactory());
 
@@ -61,8 +60,16 @@ public class Producer {
 		ProducerProtocolHandler writer = new Producer.ProducerProtocolHandler();
 
 		acceptor.setHandler(writer);
-		acceptor.bind(new InetSocketAddress(PORT));
-		System.out.println("Listening on port " + PORT);
+	}
+	
+	public static void main(String[] args) throws Exception {
+		Producer producer = new Producer();
+		producer.bind(new InetSocketAddress(DEFAULT_PORT));
+		System.out.println("Listening on port " + DEFAULT_PORT);
+	}
+
+	private void bind(InetSocketAddress inetSocketAddress) throws IOException {
+		this.acceptor.bind(inetSocketAddress);
 	}
 
 	static class ProducerProtocolHandler extends IoHandlerAdapter {

@@ -45,9 +45,7 @@ import quickfix.mina.message.FIXProtocolCodecFactory;
  * @author <a href="http://mina.apache.org">Apache MINA Project</a>
  */
 public class Consumer {
-	/** Choose your favorite port number. */
-	private static final int PORT = 1234;
-	private NioSocketConnector connector = new NioSocketConnector();
+	private final NioSocketConnector connector = new NioSocketConnector();
 
 	public Consumer() {
 		ConsumerProtocolHandler consumer = new Consumer.ConsumerProtocolHandler();
@@ -68,7 +66,7 @@ public class Consumer {
 	}
 
 	private boolean connect(InetSocketAddress inetSocketAddress) throws UnknownHostException {
-		ConnectFuture future1 = connector.connect(new InetSocketAddress(InetAddress.getLocalHost(), PORT));
+		ConnectFuture future1 = connector.connect(inetSocketAddress);
 		future1.awaitUninterruptibly();
 		System.out.println("done waiting");
 		if (future1.isConnected()) {
@@ -102,7 +100,7 @@ public class Consumer {
 
 	public static void main(String[] args) throws Exception {
 		Consumer consumer = new Consumer();
-		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), PORT));
+		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), Producer.DEFAULT_PORT));
 
 		News news = new News();
 		news.set(new Headline("headline"));
