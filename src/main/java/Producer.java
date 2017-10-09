@@ -83,21 +83,30 @@ public class Producer {
 			// session.suspendWrite();
 			Runnable r = new Runnable() {
 
+				long lastScheduledWriteBytes = 0;
 				@Override
 				public void run() {
 					// session.suspendWrite();
-					for (int i = 0; i < 100000; ++i) {
+					for (int i = 0; i < 10000000; ++i) {
 						System.out.println("scheduled write messages " + session.getScheduledWriteMessages());
-						System.out.println("scheduled write bytes " + session.getScheduledWriteBytes());
+						long scheduledWriteBytes = session.getScheduledWriteBytes();
+						System.out.println("scheduled write bytes " + scheduledWriteBytes);
 						System.out.println("scheduled write request queue size " + session.getWriteRequestQueue().size());
 						System.out.println("in writer : writing " + i);
+						if (scheduledWriteBytes < lastScheduledWriteBytes) {
+							System.out.println("scheduled write bytes " + scheduledWriteBytes + 
+									" less than last scheduled write bytes " + lastScheduledWriteBytes);
+							//break;
+						}
+						lastScheduledWriteBytes = scheduledWriteBytes;
 						News news = new News();
 						news.set(new Headline("Headline : " + Integer.toString(i)));
-						try {
-							session.write(news).await(10);
-						} catch (InterruptedException e) {
-							e.printStackTrace();
-						}
+						//try {
+							//session.write(news).await(10);
+							session.write(news);
+//						} catch (InterruptedException e) {
+//							e.printStackTrace();
+//						}
 					}
 				}
 			};
