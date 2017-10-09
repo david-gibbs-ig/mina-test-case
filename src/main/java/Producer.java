@@ -46,7 +46,9 @@ import quickfix.mina.message.FIXProtocolCodecFactory;
  */
 public class Producer {
 	public static final int DEFAULT_PORT = 1234;
+	public static final int DEFAULT_EXPECTED_MESSAGES = 100;
 	private final NioSocketAcceptor acceptor = new NioSocketAcceptor();
+	private int messagesToSend = DEFAULT_EXPECTED_MESSAGES;
 
 	public Producer() {
 		MdcInjectionFilter mdcInjectionFilter = new MdcInjectionFilter();
@@ -57,24 +59,32 @@ public class Producer {
 		chain.addLast("codec", fixCodecFilter);
 		chain.addLast("logger", new LoggingFilter());
 
-		ProducerProtocolHandler writer = new Producer.ProducerProtocolHandler();
-
-		acceptor.setHandler(writer);
 	}
 	
-	public static void main(String[] args) throws Exception {
-		Producer producer = new Producer();
-		producer.bind(new InetSocketAddress(DEFAULT_PORT));
-		System.out.println("Listening on port " + DEFAULT_PORT);
+	public int getMessagesToSend() {
+		return messagesToSend;
+	}
+
+	public void setMessagesToSend(int messagesToSend) {
+		this.messagesToSend = messagesToSend;
 	}
 
 	private void bind(InetSocketAddress inetSocketAddress) throws IOException {
+		ProducerProtocolHandler writer = new Producer.ProducerProtocolHandler(this,this.messagesToSend);
+		acceptor.setHandler(writer);
 		this.acceptor.bind(inetSocketAddress);
 	}
 
 	static class ProducerProtocolHandler extends IoHandlerAdapter {
 		private final Set<IoSession> sessions = Collections.synchronizedSet(new HashSet<IoSession>());
-		private final ExecutorService exec = Executors.newSingleThreadExecutor();
+		private final ExecutorService execService = Executors.newSingleThreadExecutor();
+		private final int messagesToSend;
+		private final Producer producer;
+		
+		ProducerProtocolHandler(Producer producer, int messagesToSend) {
+			this.producer = producer;
+			this.messagesToSend = messagesToSend;
+		}
 
 		@Override
 		public void exceptionCaught(IoSession session, Throwable cause) {
@@ -94,12 +104,12 @@ public class Producer {
 				@Override
 				public void run() {
 					// session.suspendWrite();
-					for (int i = 0; i < 10000000; ++i) {
+					for (int i = 0; i < ProducerProtocolHandler.this.messagesToSend; ++i) {
+						System.out.println("in writer : writing " + (i +1) );
 						System.out.println("scheduled write messages " + session.getScheduledWriteMessages());
 						long scheduledWriteBytes = session.getScheduledWriteBytes();
 						System.out.println("scheduled write bytes " + scheduledWriteBytes);
 						System.out.println("scheduled write request queue size " + session.getWriteRequestQueue().size());
-						System.out.println("in writer : writing " + i);
 						if (scheduledWriteBytes < lastScheduledWriteBytes) {
 							System.out.println("scheduled write bytes " + scheduledWriteBytes + 
 									" less than last scheduled write bytes " + lastScheduledWriteBytes);
@@ -117,14 +127,28 @@ public class Producer {
 					}
 				}
 			};
-			exec.submit(r);
+			execService.submit(r);
 		}
 
 		@Override
 		public void sessionClosed(IoSession session) throws Exception {
 			sessions.remove(session);
+			if (sessions.size() == 0) {
+				this.execService.shutdown();
+				this.producer.stop();
+			}
 		}
-
 	}
 
+	public void stop() {
+		this.acceptor.unbind();
+		this.acceptor.dispose();
+	}
+	
+	public static void main(String[] args) throws Exception {
+		Producer producer = new Producer();
+		producer.setMessagesToSend(Producer.DEFAULT_EXPECTED_MESSAGES);
+		producer.bind(new InetSocketAddress(DEFAULT_PORT));
+		System.out.println("Listening on port " + DEFAULT_PORT);
+	}
 }
