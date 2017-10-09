@@ -1,3 +1,4 @@
+
 /*
  *  Based on Mina Chat Example DG
  *  
@@ -22,6 +23,7 @@
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.UnknownHostException;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -45,28 +47,34 @@ import quickfix.mina.message.FIXProtocolCodecFactory;
 public class Consumer {
 	/** Choose your favorite port number. */
 	private static final int PORT = 1234;
+	private NioSocketConnector connector = new NioSocketConnector();
 
-	public static void main(String[] args) throws Exception {
+	public Consumer() {
 		ConsumerProtocolHandler consumer = new Consumer.ConsumerProtocolHandler();
 
 		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new FIXProtocolCodecFactory());
 
-		NioSocketConnector connector = new NioSocketConnector();
 		connector.getFilterChain().addLast("mdc", new MdcInjectionFilter());
 		connector.getFilterChain().addLast("codec", fixCodecFilter);
 		connector.getFilterChain().addLast("logger", new LoggingFilter());
 
 		connector.setHandler(consumer);
+	}
+
+	public void write(News news) {
+		for (IoSession session : this.connector.getManagedSessions().values()) {
+			session.write(news);
+		}
+	}
+
+	private boolean connect(InetSocketAddress inetSocketAddress) throws UnknownHostException {
 		ConnectFuture future1 = connector.connect(new InetSocketAddress(InetAddress.getLocalHost(), PORT));
 		future1.awaitUninterruptibly();
 		System.out.println("done waiting");
-		if (!future1.isConnected()) {
-			return;
-		}
-		News news = new News();
-		news.set(new Headline("headline"));
-		for (IoSession session : connector.getManagedSessions().values()) {
-			session.write(news);
+		if (future1.isConnected()) {
+			return true;
+		} else {
+			return false;
 		}
 	}
 
@@ -90,7 +98,15 @@ public class Consumer {
 		public void sessionClosed(IoSession session) throws Exception {
 			sessions.remove(session);
 		}
+	}
 
+	public static void main(String[] args) throws Exception {
+		Consumer consumer = new Consumer();
+		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), PORT));
+
+		News news = new News();
+		news.set(new Headline("headline"));
+		consumer.write(news);
 	}
 
 }
