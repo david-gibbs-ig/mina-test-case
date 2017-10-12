@@ -29,10 +29,10 @@ import org.apache.mina.core.future.ConnectFuture;
 import org.apache.mina.core.service.IoHandlerAdapter;
 import org.apache.mina.core.session.IoSession;
 import org.apache.mina.filter.codec.ProtocolCodecFilter;
-import org.apache.mina.filter.logging.LoggingFilter;
-import org.apache.mina.filter.logging.MdcInjectionFilter;
 import org.apache.mina.transport.socket.SocketConnector;
 import org.apache.mina.transport.socket.nio.NioSocketConnector;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import quickfix.field.Headline;
 import quickfix.fix44.News;
@@ -43,8 +43,9 @@ import quickfix.mina.message.FIXProtocolCodecFactory;
  * @author <a href="http://mina.apache.org">Apache MINA Project</a>
  */
 public class Consumer {
+	private static Logger LOGGER = LoggerFactory.getLogger(Consumer.class);
 	private final SocketConnector connector = new NioSocketConnector();
-	private int expectedMessages = Producer.DEFAULT_EXPECTED_MESSAGES;
+	private int expectedMessages = Producer.DEFAULT_MSG_COUNT;
 	
 	public int getExpectedMessages() {
 		return expectedMessages;
@@ -57,22 +58,22 @@ public class Consumer {
 	public Consumer() {
 		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new FIXProtocolCodecFactory());
 		ConsumerProtocolHandler consumer = new Consumer.ConsumerProtocolHandler(connector, this.expectedMessages);
-		connector.getFilterChain().addLast("mdc", new MdcInjectionFilter());
 		connector.getFilterChain().addLast("codec", fixCodecFilter);
-		connector.getFilterChain().addLast("logger", new LoggingFilter());
+		//connector.getFilterChain().addLast("logger", new LoggingFilter());
 		connector.setHandler(consumer);
 	}
 
 	public void write(News news) {
 		for (IoSession session : this.connector.getManagedSessions().values()) {
+			LOGGER.info("writing news.");
 			session.write(news);
 		}
 	}
 
-	private boolean connect(InetSocketAddress inetSocketAddress) throws UnknownHostException {
+	public boolean connect(InetSocketAddress inetSocketAddress) throws UnknownHostException {
 		ConnectFuture future1 = connector.connect(inetSocketAddress);
 		future1.awaitUninterruptibly();
-		System.out.println("done waiting");
+		LOGGER.info("done waiting, connected = " + future1.isConnected());
 		if (future1.isConnected()) {
 			return true;
 		} else {
@@ -92,7 +93,7 @@ public class Consumer {
 		
 		@Override
 		public void exceptionCaught(IoSession session, Throwable cause) {
-			System.out.println("Unexpected exception." + cause);
+			LOGGER.error("Unexpected exception.",cause);
 			cause.printStackTrace();
 			// Close connection when unexpected exception is caught.
 			session.closeNow();
@@ -101,7 +102,7 @@ public class Consumer {
 		@Override
 		public void messageReceived(IoSession session, Object message) {
 			++receivedMessages;
-			System.out.println("received : " + message + " " + receivedMessages );
+			LOGGER.debug("received : " + message + " " + receivedMessages );
 			if (receivedMessages == expectedMessages) {
 				session.closeNow();
 				this.connector.dispose();
@@ -110,7 +111,8 @@ public class Consumer {
 
 		@Override
 		public void sessionClosed(IoSession session) throws Exception {
-			System.out.println("Session closed");
+			LOGGER.info("Session closed");
+			this.connector.dispose();
 		}
 	}
 
