@@ -7,7 +7,7 @@
 			<pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
 		</encoder>
 		<filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-        	<level>INFO</level>
+        	<level>ERROR</level>
     	</filter>
 	</appender>
 
@@ -27,17 +27,17 @@
 		</encoder>
 	</appender>
 	
-	<logger name="Consumer" additivity="false" level="debug">
+	<logger name="Consumer" additivity="false" level="info">
    		 <appender-ref ref="CONSUMER-FILE"/>
    		 <appender-ref ref="STDOUT" />
 	</logger>
 	
-	<logger name="Producer" additivity="false" level="debug">
+	<logger name="Producer" additivity="false" level="info">
    		 <appender-ref ref="PRODUCER-FILE"/>
    		 <appender-ref ref="STDOUT" />
 	</logger>
 	
-	<logger name="quickfix.mina.message.FIXMessageDecoder" additivity="false" level="debug">
+	<logger name="quickfix.mina.message.FIXMessageDecoder" additivity="false" level="info">
    		 <appender-ref ref="CONSUMER-FILE"/>
 	</logger>
 

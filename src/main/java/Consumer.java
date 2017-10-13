@@ -59,7 +59,6 @@ public class Consumer {
 		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new FIXProtocolCodecFactory());
 		ConsumerProtocolHandler consumer = new Consumer.ConsumerProtocolHandler(connector, this.expectedMessages);
 		connector.getFilterChain().addLast("codec", fixCodecFilter);
-		//connector.getFilterChain().addLast("logger", new LoggingFilter());
 		connector.setHandler(consumer);
 	}
 
@@ -73,7 +72,7 @@ public class Consumer {
 	public boolean connect(InetSocketAddress inetSocketAddress) throws UnknownHostException {
 		ConnectFuture future1 = connector.connect(inetSocketAddress);
 		future1.awaitUninterruptibly();
-		LOGGER.info("done waiting, connected = " + future1.isConnected());
+		LOGGER.info("done waiting, connected = {}", future1.isConnected());
 		if (future1.isConnected()) {
 			return true;
 		} else {
@@ -102,7 +101,7 @@ public class Consumer {
 		@Override
 		public void messageReceived(IoSession session, Object message) {
 			++receivedMessages;
-			LOGGER.debug("received : " + message + " " + receivedMessages );
+			LOGGER.debug("received : {}, Msg Number {}", message, receivedMessages );
 			if (receivedMessages == expectedMessages) {
 				session.closeNow();
 				this.connector.dispose();
@@ -111,7 +110,7 @@ public class Consumer {
 
 		@Override
 		public void sessionClosed(IoSession session) throws Exception {
-			LOGGER.info("Session closed");
+			LOGGER.info("Session closed.");
 			this.connector.dispose();
 		}
 	}
