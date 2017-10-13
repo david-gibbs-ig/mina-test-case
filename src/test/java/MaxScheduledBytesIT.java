@@ -54,7 +54,7 @@ public class MaxScheduledBytesIT {
 		Consumer consumer = new Consumer();
 		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), inetSocketAddress.getPort()));
 		News news = new News();
-		news.set(new Headline("headline"));
+		news.set(new Headline("Hello"));
 		consumer.write(news);
 		boolean isCompleted = producer.awaitCompletion(deadLine, deadLineTimeUnit);
 		LOGGER.info("Is Completed ? [{}]", isCompleted);

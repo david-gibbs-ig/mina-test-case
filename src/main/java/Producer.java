@@ -260,10 +260,6 @@ public class Producer {
 		return result;
 	}
 
-	public boolean isBufferWritten() {
-		return this.isAssertCorrectnessOfScheduledWriteMessages;
-	}
-
 	public static void main(String[] args) {
 		int deadLine = 60;
 		TimeUnit deadLineTimeUnit = TimeUnit.SECONDS;
