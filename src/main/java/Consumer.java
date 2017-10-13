@@ -60,10 +60,10 @@ public class Consumer {
 		connector.setHandler(consumer);
 	}
 
-	public void write(String news) {
+	public void write(String message) {
 		for (IoSession session : this.connector.getManagedSessions().values()) {
-			LOGGER.info("writing news.");
-			session.write(news);
+			LOGGER.info("writing {}", message);
+			session.write(message);
 		}
 	}
 

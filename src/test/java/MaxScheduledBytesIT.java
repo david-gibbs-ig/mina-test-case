@@ -50,7 +50,7 @@ public class MaxScheduledBytesIT {
 		LOGGER.info("Listening on port {}", inetSocketAddress.getPort());
 		Consumer consumer = new Consumer();
 		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), inetSocketAddress.getPort()));
-		consumer.write("headline");
+		consumer.write("Hello");
 		boolean isCompleted = producer.awaitCompletion(deadLine, deadLineTimeUnit);
 		LOGGER.info("Is Completed ? [{}]", isCompleted);
 		boolean isSuccessful = producer.stop();
