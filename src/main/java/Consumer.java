@@ -1,3 +1,4 @@
+
 /*
  *  Based on Mina Chat Example DG
  *  
@@ -22,70 +23,100 @@
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
+import java.net.UnknownHostException;
 
 import org.apache.mina.core.future.ConnectFuture;
 import org.apache.mina.core.service.IoHandlerAdapter;
 import org.apache.mina.core.session.IoSession;
 import org.apache.mina.filter.codec.ProtocolCodecFilter;
 import org.apache.mina.filter.codec.textline.TextLineCodecFactory;
-import org.apache.mina.filter.logging.LoggingFilter;
-import org.apache.mina.filter.logging.MdcInjectionFilter;
+import org.apache.mina.transport.socket.SocketConnector;
 import org.apache.mina.transport.socket.nio.NioSocketConnector;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  *
  * @author <a href="http://mina.apache.org">Apache MINA Project</a>
  */
 public class Consumer {
-	/** Choose your favorite port number. */
-	private static final int PORT = 1234;
 
-	public static void main(String[] args) throws Exception {
-		ConsumerProtocolHandler consumer = new Consumer.ConsumerProtocolHandler();
+	private static Logger LOGGER = LoggerFactory.getLogger(Consumer.class);
+	private final SocketConnector connector = new NioSocketConnector();
+	private int expectedMessages = Producer.DEFAULT_MSG_COUNT;
+	
+	public int getExpectedMessages() {
+		return expectedMessages;
+	}
 
-		ProtocolCodecFilter textLineCodecFilter = new ProtocolCodecFilter(new TextLineCodecFactory());
+	public void setExpectedMessages(int expectedMessages) {
+		this.expectedMessages = expectedMessages;
+	}
 
-		NioSocketConnector connector = new NioSocketConnector();
-		connector.getFilterChain().addLast("mdc", new MdcInjectionFilter());
-		connector.getFilterChain().addLast("codec", textLineCodecFilter);
-		connector.getFilterChain().addLast("logger", new LoggingFilter());
-
+	public Consumer() {
+		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new TextLineCodecFactory());
+		ConsumerProtocolHandler consumer = new Consumer.ConsumerProtocolHandler(connector, this.expectedMessages);
+		connector.getFilterChain().addLast("codec", fixCodecFilter);
 		connector.setHandler(consumer);
-		ConnectFuture future1 = connector.connect(new InetSocketAddress(InetAddress.getLocalHost(), PORT));
-		future1.awaitUninterruptibly();
-		System.out.println("done waiting");
-		if (!future1.isConnected()) {
-			return;
+	}
+
+	public void write(String news) {
+		for (IoSession session : this.connector.getManagedSessions().values()) {
+			LOGGER.info("writing news.");
+			session.write(news);
 		}
-		for (IoSession session : connector.getManagedSessions().values()) {
-			session.write("hello");
+	}
+
+	public boolean connect(InetSocketAddress inetSocketAddress) throws UnknownHostException {
+		ConnectFuture future1 = connector.connect(inetSocketAddress);
+		future1.awaitUninterruptibly();
+		LOGGER.info("done waiting, connected = {}", future1.isConnected());
+		if (future1.isConnected()) {
+			return true;
+		} else {
+			return false;
 		}
 	}
 
 	static class ConsumerProtocolHandler extends IoHandlerAdapter {
-		private final Set<IoSession> sessions = Collections.synchronizedSet(new HashSet<IoSession>());
-
+		private final SocketConnector connector;
+		private final int expectedMessages;
+		private int receivedMessages = 0;
+		
+		public ConsumerProtocolHandler (SocketConnector socketConnector, int expectedMessages) {
+			this.connector = socketConnector;
+			this.expectedMessages = expectedMessages;
+		}
+		
 		@Override
 		public void exceptionCaught(IoSession session, Throwable cause) {
-			System.out.println("Unexpected exception." + cause);
+			LOGGER.error("Unexpected exception.",cause);
+			cause.printStackTrace();
 			// Close connection when unexpected exception is caught.
 			session.closeNow();
 		}
 
 		@Override
 		public void messageReceived(IoSession session, Object message) {
-			System.out.println("received: " + message);
-			sessions.add(session);
+			++receivedMessages;
+			LOGGER.debug("received : {}, Msg Number {}", message, receivedMessages );
+			if (receivedMessages == expectedMessages) {
+				session.closeNow();
+				this.connector.dispose();
+			}
 		}
 
 		@Override
 		public void sessionClosed(IoSession session) throws Exception {
-			sessions.remove(session);
+			LOGGER.info("Session closed.");
+			this.connector.dispose();
 		}
+	}
 
+	public static void main(String[] args) throws Exception {
+		Consumer consumer = new Consumer();
+		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), Producer.DEFAULT_PORT));
+		consumer.write("Hello");
 	}
 
 }
