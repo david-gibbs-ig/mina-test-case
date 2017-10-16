@@ -11,9 +11,9 @@ import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class MaxScheduledBytesIT {
+public class ScheduledBytesAndMessagesIT {
 	
-	private static Logger LOGGER = LoggerFactory.getLogger(MaxScheduledBytesIT.class);
+	private static Logger LOGGER = LoggerFactory.getLogger(ScheduledBytesAndMessagesIT.class);
 	private Producer producer;
 	private InetSocketAddress inetSocketAddress;
 	private int expectedConnections;
