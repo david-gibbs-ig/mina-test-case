@@ -23,8 +23,9 @@
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -32,10 +33,13 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.mina.core.filterchain.DefaultIoFilterChainBuilder;
-import org.apache.mina.core.future.CloseFuture;
 import org.apache.mina.core.service.IoHandlerAdapter;
 import org.apache.mina.core.session.IoSession;
 import org.apache.mina.filter.codec.ProtocolCodecFilter;
@@ -51,30 +55,45 @@ import org.slf4j.LoggerFactory;
 public class Producer {
 	public static final int DEFAULT_PORT = 1234;
 	public static final int DEFAULT_MSG_COUNT = 100000;
+	public static final int DEFAULT_PRODUCER_THREADS = 3;
+	public static final int DEFAULT_EXPECTED_CONNECTIONS = 1;
+	public static final String GOODBYE = "GoodBye";
+	public static final String HELLO = "Hello";
 	private final NioSocketAcceptor acceptor = new NioSocketAcceptor();
-	private final ExecutorService execService = Executors.newSingleThreadExecutor();
+	private final ExecutorService execService;
 
-	private CountDownLatch countDownLatch;
 	private ProducerProtocolHandler writer;
-	private Future<Integer> taskFuture;
+	private List<Future<Integer>> taskFutures = new ArrayList<Future<Integer>>();
 
 	private final int messagesToSend;
 
-	private long sumScheduledWriteBytes = 0;
-	private long sumScheduledWriteMessages = 0;
-	private long sumWriteRequestQueueSize = 0;
-
-	protected long maxScheduledWriteBytes = 0;
-	protected long maxScheduledWriteMessages = 0;
-	protected long maxWriteRequestQueueSize = 0;
-
-	protected double meanScheduledWriteBytes = 0;
-	protected double meanScheduledWriteMessages = 0;
-	protected double meanWriteRequestQueueSize = 0;
+	private LongAdder sumScheduledWriteBytes = new LongAdder();
+	private LongAdder sumScheduledWriteMessages = new LongAdder();
+	private LongAdder sumWriteRequestQueueSize = new LongAdder();
+	private LongAdder sumSentMessages = new LongAdder();
 	
+	protected AtomicLong maxScheduledWriteBytes = new AtomicLong();
+	protected AtomicLong maxScheduledWriteMessages = new AtomicLong();
+	protected AtomicLong maxWriteRequestQueueSize = new AtomicLong();
+
 	private static Logger LOGGER = LoggerFactory.getLogger(Producer.class);
 
 	protected boolean isAssertCorrectnessOfScheduledWriteMessages = false;
+	private int numberOfTasks;
+	private final int expectedConnections;
+	
+	public Producer(int messagesToSend, int expectedConnections, int numberOfTasks) {
+		this.messagesToSend = messagesToSend;
+		//number of tasks (per request for data)
+		this.numberOfTasks = numberOfTasks;
+		//one thread per number of tasks
+		this.execService = Executors.newFixedThreadPool(this.numberOfTasks);
+		this.expectedConnections = expectedConnections;
+		this.acceptor.setCloseOnDeactivation(false);
+		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new TextLineCodecFactory());
+		DefaultIoFilterChainBuilder chain = acceptor.getFilterChain();
+		chain.addLast("codec", fixCodecFilter);
+	}
 
 	public boolean isAssertCorrectnessOfScheduledWriteMessages() {
 		return isAssertCorrectnessOfScheduledWriteMessages;
@@ -84,33 +103,175 @@ public class Producer {
 		this.isAssertCorrectnessOfScheduledWriteMessages = isAssertCorrectnessOfScheduledWriteMessages;
 	}
 
-	public Producer(int messagesToSend) {
-		this.messagesToSend = messagesToSend;
-		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new TextLineCodecFactory());
-
-		DefaultIoFilterChainBuilder chain = acceptor.getFilterChain();
-		chain.addLast("codec", fixCodecFilter);
-		int numberOfTasks = 1;
-		countDownLatch = new CountDownLatch(numberOfTasks);
-	}
-
 	public int getMessagesToSend() {
 		return messagesToSend;
 	}
 
+	private long getSentMessages() {
+		return this.sumSentMessages.longValue();
+	}
+
+	public long getMaxWriteRequestQueueSize() {
+		return maxWriteRequestQueueSize.get();
+	}
+
+	public long getMaxScheduledWriteMessages() {
+		return maxScheduledWriteMessages.get();
+	}
+
+	public long getMaxScheduledWriteBytes() {
+		return maxScheduledWriteBytes.get();
+	}
+
 	public void bind(InetSocketAddress inetSocketAddress) throws IOException {
-		writer = new Producer.ProducerProtocolHandler(this);
+		writer = new Producer.ProducerProtocolHandler(this, this.expectedConnections);
 		acceptor.setHandler(writer);
 		this.acceptor.bind(inetSocketAddress);
 	}
 
+	public void dataRequested(IoSession session) {
+		final CountDownLatch countDownSessionTasks = new CountDownLatch(this.numberOfTasks);
+		for (int i=0; i < this.numberOfTasks; ++i) {
+			final int taskId = i;
+			Callable<Integer> task = new Callable<Integer>() {
+				private long lastScheduledWriteBytes = 0;
+				private long lastScheduledWriteMessages = 0;
+				private long lastWriteRequestQueue = 0;
+				
+				@Override
+				public Integer call() {
+					int i = 0;
+					try {
+						for (; i < Producer.this.messagesToSend; ++i) {
+							int msgNumber = i + 1;
+							checkConditionsAndCollectMetrics(session, msgNumber);
+							String payload = "Payload : [" + Integer.toString(taskId) + "] : " + Integer.toString(msgNumber);
+							session.write(payload);
+							Producer.this.sumSentMessages.increment();
+						}
+					} finally {
+						countDownSessionTasks.countDown();
+						if (countDownSessionTasks.getCount() == 0) {
+							session.write(Producer.GOODBYE);
+							Producer.this.sumSentMessages.increment();
+						}
+					}
+					return i;
+				}
+
+				private void checkConditionsAndCollectMetrics(IoSession session, int msgNumber) {
+					LOGGER.debug("{} writing {} ", taskId, msgNumber);
+					long scheduledWriteMessages = session.getScheduledWriteMessages();
+					long scheduledWriteBytes = session.getScheduledWriteBytes();
+					long writeRequestQueueSize = session.getWriteRequestQueue().size();
+					LOGGER.debug("{} scheduled write messages {}", taskId, scheduledWriteMessages);
+					LOGGER.debug("{} scheduled write bytes {}", taskId, scheduledWriteBytes);
+					LOGGER.debug("{} scheduled write request queue size {}", taskId, writeRequestQueueSize);
+					Producer.checkAndSetMaximum(Producer.this.maxScheduledWriteBytes,scheduledWriteBytes);
+					Producer.checkAndSetMaximum(Producer.this.maxScheduledWriteMessages,scheduledWriteMessages);
+					Producer.checkAndSetMaximum(Producer.this.maxWriteRequestQueueSize,writeRequestQueueSize);
+					if (Producer.this.isAssertCorrectnessOfScheduledWriteMessages) {
+						throwIfSizeLessThanZero(scheduledWriteMessages, "ScheduledWriteMessages");
+					}
+					throwIfSizeLessThanZero(scheduledWriteBytes,   "ScheduledWriteBytes");
+					throwIfSizeLessThanZero(writeRequestQueueSize, "WriteRequestQueueSize");
+					if (scheduledWriteBytes < this.lastScheduledWriteBytes) {
+						LOGGER.debug("{} Msg {} Buffer written.", taskId, msgNumber);
+						LOGGER.debug("{} scheduledWriteBytes {} < last {} [{}]",
+								taskId,
+								scheduledWriteBytes,
+								this.lastScheduledWriteBytes,
+								this.lastScheduledWriteBytes - scheduledWriteBytes); 
+						LOGGER.debug("{} scheduledWriteMessages {} < last {} [{}]",
+								taskId,
+								scheduledWriteMessages,
+								this.lastScheduledWriteMessages,
+								this.lastScheduledWriteMessages - scheduledWriteMessages) ;
+					}
+					if (writeRequestQueueSize < this.lastWriteRequestQueue) {
+						LOGGER.debug("{} Msg {} RequestQueue written.", taskId,  msgNumber);
+						LOGGER.debug("{} writeRequestQueueSize {} < last {} [{}]",
+								taskId,
+								writeRequestQueueSize,
+								this.lastWriteRequestQueue,
+								this.lastWriteRequestQueue - writeRequestQueueSize) ;
+					}
+					this.lastScheduledWriteBytes = scheduledWriteBytes;
+					this.lastScheduledWriteMessages = scheduledWriteMessages;
+					this.lastWriteRequestQueue = writeRequestQueueSize;
+					
+					Producer.this.sumScheduledWriteBytes.add(scheduledWriteBytes);
+					Producer.this.sumScheduledWriteMessages.add(scheduledWriteMessages);
+					Producer.this.sumWriteRequestQueueSize.add(writeRequestQueueSize);
+				}
+
+				private void throwIfSizeLessThanZero(long value, String valueName) {
+					if (value < 0) {
+						throw new ConditionFailedException(valueName + " less than 0.");
+					}
+				}
+			};
+			submit(task);
+		}
+	}
+
+	private static void checkAndSetMaximum(AtomicLong currentMaximum, long valueToCompare) {
+		long l = currentMaximum.get();
+		if (valueToCompare > l) {
+			if (!currentMaximum.compareAndSet(l,valueToCompare)) {
+				// if compareAndSet returns false the current value has changed, compare again
+				checkAndSetMaximum(currentMaximum, valueToCompare);
+			};
+		}
+	}
+	
+	private void submit(Callable<Integer> task) {
+		LOGGER.debug("Adding task {} ", task);
+		this.taskFutures.add(execService.submit(task));
+	}
+
+	public boolean awaitCompletion() throws InterruptedException, ExecutionException {
+		//waiting for at least one connection
+		this.writer.awaitExpectedConnections();
+		this.acceptor.unbind();
+		this.writer.awaitExpectedDataRequests();
+		boolean overallSuccess = true;
+		for (Future<Integer> task: this.taskFutures) {
+		    try {
+				Integer messagesSent = task.get();
+				boolean result = messagesSent.intValue() == this.messagesToSend;
+			    LOGGER.info("Task {} completed : [{}]. total messages sent {}, data messages specified {}", 
+			    		task,
+			    		result == true ? "Success" :"Fail",
+			    		messagesSent,  
+			    		this.messagesToSend);
+			    if (result == false) {
+			    	overallSuccess = false;
+			    }
+		    } catch (Exception e) {
+		    	LOGGER.error("Exception",e);
+		    	throw e;
+		    }
+		}
+		this.writer.awaitSessionsClosed();
+		this.execService.shutdown();
+		this.acceptor.dispose();
+		LOGGER.info("Producer stopped.");
+		return overallSuccess;
+	}
+
 	static class ProducerProtocolHandler extends IoHandlerAdapter {
-		private final Set<IoSession> sessions = Collections.synchronizedSet(new HashSet<IoSession>());
-
+		private final Set<IoSession> sessions = new HashSet<IoSession>();
 		private final Producer producer;
-
-		ProducerProtocolHandler(Producer producer) {
+		private final Lock lock = new ReentrantLock();
+		private final Condition isSessionsEmptyCondition = lock.newCondition();
+		private final CountDownLatch countDownConnections; 
+		private final CountDownLatch countDownDataRequests; 
+		
+		ProducerProtocolHandler(Producer producer, int expectedConnections) {
 			this.producer = producer;
+			this.countDownConnections = new CountDownLatch(expectedConnections);
+			this.countDownDataRequests = new CountDownLatch(expectedConnections);
 		}
 
 		@Override
@@ -118,168 +279,123 @@ public class Producer {
 			LOGGER.error("Unexpected throwable", cause);
 			// Close connection when unexpected exception is caught.
 			session.closeNow();
+			removeSession(session);
 		}
 
 		@Override
 		public void messageReceived(IoSession session, Object message) {
-
+			if (message.toString().equals(HELLO)) {
+				LOGGER.info("{} from {}", HELLO, session);
+				this.producer.dataRequested(session);
+				this.countDownDataRequests.countDown();
+			} else if (message.toString().equals(GOODBYE)) {
+				LOGGER.info("{} from {}", GOODBYE, session);
+				closeSession(session);
+			} else {
+				LOGGER.error("{} from {}", message, session);
+			}
 			LOGGER.info("received: {} ", message.toString());
-			sessions.add(session);
-			this.producer.messageReceived(session, message);
+		}
+
+		@Override
+		public void sessionCreated(IoSession session) throws Exception {
+			processNewSession(session);
+			super.sessionCreated(session);
 		}
 
 		@Override
 		public void sessionClosed(IoSession session) throws Exception {
 			LOGGER.info("session closed.");
-			sessions.remove(session);
+			removeSession(session);
 		}
 
-		public Set<IoSession> getSessions() {
-			return sessions;
+		private void processNewSession(IoSession session) {
+			boolean isSessionNew;
+			try {
+				this.lock.lock();
+				isSessionNew = this.sessions.add(session);
+				this.countDownConnections.countDown();
+			} finally {
+				this.lock.unlock();
+			}
+			if (isSessionNew) {
+				LOGGER.info("Added new session {}.", session);
+			} else { 
+				LOGGER.warn("Session {} already exists.", session);
+			}
 		}
-	}
 
-	public boolean awaitCompletion(long timeout, TimeUnit timeUnit) throws InterruptedException {
-		return this.countDownLatch.await(timeout, timeUnit);
-	}
+		private void removeSession(IoSession session) {
+			boolean isSessionExtant;
+			try {
+				this.lock.lock();
+				isSessionExtant = this.sessions.remove(session);
+				if (this.sessions.isEmpty()) {
+					this.isSessionsEmptyCondition.signal();
+				}
+			} finally {
+				this.lock.unlock();
+			}
+			if (isSessionExtant) {
+				LOGGER.info("Removed session {}.", session);
+			} else {
+				LOGGER.warn("Session {} did not exist.", session);
+			}
+		}
+		
+		private void closeSession(IoSession session) {
+			session.closeNow();
+			removeSession(session);
+		}
 
-	public void messageReceived(IoSession session, Object message) {
-		Callable<Integer> task = new Callable<Integer>() {
-			long lastScheduledWriteBytes = 0;
-			long lastScheduledWriteMessages = 0;
-			long lastWriteRequestQueue = 0;
-			
-			@Override
-			public Integer call() {
-				int i = 0;
+		public void awaitSessionsClosed() throws InterruptedException {
+			while (true) {
 				try {
-					for (; i < Producer.this.messagesToSend; ++i) {
-						int msgNumber = i + 1;
-						checkConditionsAndCollectMetrics(session, msgNumber);
-						String news = "Headline : " + Integer.toString(msgNumber);
-						session.write(news);
+					this.lock.lock();
+					if (this.sessions.isEmpty()) {
+						break;
+					} else {
+						this.isSessionsEmptyCondition.await();
 					}
-					Producer.this.meanScheduledWriteBytes = Producer.this.sumScheduledWriteBytes / i;
-					Producer.this.meanScheduledWriteMessages = Producer.this.sumScheduledWriteMessages / i;
-					Producer.this.meanWriteRequestQueueSize = Producer.this.sumWriteRequestQueueSize / i;
-				} catch (Exception e) {
-					LOGGER.error("Exception ",e);
 				} finally {
-					session.closeOnFlush();
-					Producer.this.countDownLatch.countDown();
-				}
-				return i;
-			}
-
-			private void checkConditionsAndCollectMetrics(IoSession session, int msgNumber) {
-				LOGGER.debug("-------------------------------------------------------------------------------------");
-				LOGGER.debug("writing {} ", msgNumber);
-				long scheduledWriteMessages = session.getScheduledWriteMessages();
-				LOGGER.debug("scheduled write messages {}", scheduledWriteMessages);
-				long scheduledWriteBytes = session.getScheduledWriteBytes();
-				LOGGER.debug("scheduled write bytes {}", scheduledWriteBytes);
-				long writeRequestQueueSize = session.getWriteRequestQueue().size();
-				LOGGER.debug("scheduled write request queue size {}", writeRequestQueueSize);
-				if (scheduledWriteBytes > Producer.this.maxScheduledWriteBytes) {
-					Producer.this.maxScheduledWriteBytes = scheduledWriteBytes;
-				}
-				if (scheduledWriteMessages > Producer.this.maxScheduledWriteMessages) {
-					Producer.this.maxScheduledWriteMessages = scheduledWriteMessages;
-				}
-				if (writeRequestQueueSize > Producer.this.maxWriteRequestQueueSize) {
-					Producer.this.maxWriteRequestQueueSize = writeRequestQueueSize;
-				}
-				if (Producer.this.isAssertCorrectnessOfScheduledWriteMessages) {
-					throwIfSizeLessThanZero(scheduledWriteMessages, "ScheduledWriteMessages");
-				}
-				throwIfSizeLessThanZero(scheduledWriteBytes,   "ScheduledWriteBytes");
-				throwIfSizeLessThanZero(writeRequestQueueSize, "WriteRequestQueueSize");
-				if (scheduledWriteBytes < this.lastScheduledWriteBytes) {
-					LOGGER.info("Msg {} Buffer written.", msgNumber);
-					LOGGER.info("scheduledWriteBytes {} < last {} [{}]",
-							scheduledWriteBytes,
-							this.lastScheduledWriteBytes,
-							this.lastScheduledWriteBytes - scheduledWriteBytes); 
-					LOGGER.info("scheduledWriteMessages {} < last {} [{}]",
-							scheduledWriteMessages,
-							this.lastScheduledWriteMessages,
-							this.lastScheduledWriteMessages - scheduledWriteMessages) ;
-				}
-				if (writeRequestQueueSize < this.lastWriteRequestQueue) {
-					LOGGER.info("Msg " + msgNumber + " RequestQueue written.");
-					LOGGER.info("writeRequestQueueSize {} < last {} [{}]",
-							writeRequestQueueSize,
-							this.lastWriteRequestQueue,
-							this.lastWriteRequestQueue - writeRequestQueueSize) ;
-				}
-				this.lastScheduledWriteBytes = scheduledWriteBytes;
-				this.lastScheduledWriteMessages = scheduledWriteMessages;
-				this.lastWriteRequestQueue = writeRequestQueueSize;
-				
-				Producer.this.sumScheduledWriteBytes = Producer.this.sumScheduledWriteBytes + scheduledWriteBytes;
-				Producer.this.sumScheduledWriteMessages = Producer.this.sumScheduledWriteMessages + scheduledWriteMessages;
-				Producer.this.sumWriteRequestQueueSize = Producer.this.sumWriteRequestQueueSize + writeRequestQueueSize;
-			}
-			
-			private void throwIfSizeLessThanZero(long value, String valueName) {
-				if (value < 0) {
-					throw new ConditionFailedException(valueName + " less than 0.");
+					this.lock.unlock();
 				}
 			}
-			
-
-		};
-		submit(task);
-	}
-
-	public void submit(Callable<Integer> task) {
-		this.taskFuture = execService.submit(task);
-	}
-
-	public Future<Integer> getTaskFuture() {
-		return taskFuture;
-	}
-
-	public boolean stop() throws InterruptedException, ExecutionException {
-		for (IoSession ioSession : writer.getSessions()) {
-			CloseFuture closeOnFlush = ioSession.closeOnFlush();
-			closeOnFlush.await();
 		}
-	    Integer messagesSent = getTaskFuture().get();
-		boolean result = messagesSent == this.messagesToSend;
-	    LOGGER.info("Task completed : [{}]. messages sent {}, messages specified {}", 
-	    		result == true ? "Success" :"Fail",
-	    		messagesSent,  
-	    		this.messagesToSend);
-		this.execService.shutdown();
-		this.acceptor.unbind();
-		this.acceptor.dispose();
-		LOGGER.info("Producer stopped.");
-		return result;
-	}
 
-	public static void main(String[] args) {
-		int deadLine = 60;
-		TimeUnit deadLineTimeUnit = TimeUnit.SECONDS;
+		public void awaitExpectedConnections() throws InterruptedException {
+			this.countDownConnections.await();
+		}
+
+		public void awaitExpectedDataRequests() throws InterruptedException {
+			this.countDownDataRequests.await();
+		}
+	}
+	
+	public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
 		boolean isSuccessful = false;
 		try {
-			Producer producer = new Producer(Producer.DEFAULT_MSG_COUNT);
+			int tasks = Producer.DEFAULT_PRODUCER_THREADS;
+			int msgCount = Producer.DEFAULT_MSG_COUNT;
+			int expectedConnections = Producer.DEFAULT_EXPECTED_CONNECTIONS;
+			Producer producer = new Producer(msgCount,expectedConnections,tasks);
 			producer.setAssertCorrectnessOfScheduledWriteMessages(false);
 			LOGGER.info("Assert Correctness Of ScheduledWriteMessages : {}", producer.isAssertCorrectnessOfScheduledWriteMessages());
 			producer.bind(new InetSocketAddress(DEFAULT_PORT));
 			LOGGER.info("Listening on port {}", DEFAULT_PORT);
-			boolean isCompleted = producer.awaitCompletion(deadLine, deadLineTimeUnit);
-			LOGGER.info("Is Completed ? [{}]", isCompleted);
-			isSuccessful = producer.stop();
-			LOGGER.info("maxScheduledWriteBytes     {} ", producer.maxScheduledWriteBytes);
-			LOGGER.info("meanScheduledWriteBytes    {}  ", producer.meanScheduledWriteBytes);
+			isSuccessful = producer.awaitCompletion();
+			long maxScheduledWriteBytes = producer.getMaxScheduledWriteBytes();
+			LOGGER.info("Total Messages Sent        {}", producer.getSentMessages());
+			LOGGER.info("maxScheduledWriteBytes     {} ", maxScheduledWriteBytes);
+			LOGGER.info("meanScheduledWriteBytes    {}  ", maxScheduledWriteBytes/producer.getSentMessages());
 
-			LOGGER.info("maxScheduledWriteMessages  {}", producer.maxScheduledWriteMessages);
-			LOGGER.info("meanScheduledWriteMessages {}", producer.meanScheduledWriteMessages);
-			LOGGER.info("maxWriteRequestQueueSize   {}",  producer.maxWriteRequestQueueSize);
-			LOGGER.info("meanWriteRequestQueueSize  {}",  producer.meanWriteRequestQueueSize);
-		} catch (InterruptedException | ExecutionException | IOException e) {
-			LOGGER.info("Exception ", e);
+			long maxScheduledWriteMessages = producer.getMaxScheduledWriteMessages();
+			LOGGER.info("maxScheduledWriteMessages  {}", maxScheduledWriteMessages);
+			LOGGER.info("meanScheduledWriteMessages {}", maxScheduledWriteMessages/producer.getSentMessages());
+			
+			long maxWriteRequestQueueSize = producer.getMaxWriteRequestQueueSize();
+			LOGGER.info("maxWriteRequestQueueSize   {}",  maxWriteRequestQueueSize);
+			LOGGER.info("meanWriteRequestQueueSize  {}",  maxWriteRequestQueueSize/producer.getSentMessages());
 		} finally {
 			LOGGER.info("Status [{}]" , isSuccessful == true ? "Success" :"Fail");
 		}

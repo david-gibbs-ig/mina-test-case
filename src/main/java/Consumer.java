@@ -24,6 +24,7 @@
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
+import java.util.concurrent.atomic.LongAdder;
 
 import org.apache.mina.core.future.ConnectFuture;
 import org.apache.mina.core.service.IoHandlerAdapter;
@@ -43,19 +44,12 @@ public class Consumer {
 
 	private static Logger LOGGER = LoggerFactory.getLogger(Consumer.class);
 	private final SocketConnector connector = new NioSocketConnector();
-	private int expectedMessages = Producer.DEFAULT_MSG_COUNT;
+	private final LongAdder totalMessages = new LongAdder();
 	
-	public int getExpectedMessages() {
-		return expectedMessages;
-	}
-
-	public void setExpectedMessages(int expectedMessages) {
-		this.expectedMessages = expectedMessages;
-	}
-
 	public Consumer() {
 		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new TextLineCodecFactory());
-		ConsumerProtocolHandler consumer = new Consumer.ConsumerProtocolHandler(connector, this.expectedMessages);
+		ConsumerProtocolHandler consumer = 
+			new Consumer.ConsumerProtocolHandler(connector, totalMessages);
 		connector.getFilterChain().addLast("codec", fixCodecFilter);
 		connector.setHandler(consumer);
 	}
@@ -80,12 +74,12 @@ public class Consumer {
 
 	static class ConsumerProtocolHandler extends IoHandlerAdapter {
 		private final SocketConnector connector;
-		private final int expectedMessages;
 		private int receivedMessages = 0;
+		private final LongAdder totalMessages;
 		
-		public ConsumerProtocolHandler (SocketConnector socketConnector, int expectedMessages) {
+		public ConsumerProtocolHandler (SocketConnector socketConnector, LongAdder totalMessages) {
 			this.connector = socketConnector;
-			this.expectedMessages = expectedMessages;
+			this.totalMessages = totalMessages;
 		}
 		
 		@Override
@@ -99,8 +93,11 @@ public class Consumer {
 		@Override
 		public void messageReceived(IoSession session, Object message) {
 			++receivedMessages;
+			this.totalMessages.increment();
 			LOGGER.debug("received : {}, Msg Number {}", message, receivedMessages );
-			if (receivedMessages == expectedMessages) {
+			if (message.toString().contains(Producer.GOODBYE)) {
+				LOGGER.info("{} received, closing session", Producer.GOODBYE);
+				LOGGER.info("{} messages received", this.totalMessages);
 				session.closeNow();
 				this.connector.dispose();
 			}
@@ -116,7 +113,7 @@ public class Consumer {
 	public static void main(String[] args) throws Exception {
 		Consumer consumer = new Consumer();
 		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), Producer.DEFAULT_PORT));
-		consumer.write("Hello");
+		consumer.write(Producer.HELLO);
 	}
 
 }

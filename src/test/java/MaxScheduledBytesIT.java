@@ -5,7 +5,6 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -16,17 +15,14 @@ public class MaxScheduledBytesIT {
 	
 	private static Logger LOGGER = LoggerFactory.getLogger(MaxScheduledBytesIT.class);
 	private Producer producer;
-	private int deadLine;
-	private TimeUnit deadLineTimeUnit;
-	private int messagesToSend;
 	private InetSocketAddress inetSocketAddress;
 	
 	@Before
 	public void setUp() throws Exception {
-		deadLine = 60;
-		deadLineTimeUnit = TimeUnit.SECONDS;
-		messagesToSend = Producer.DEFAULT_MSG_COUNT;
-		producer = new Producer(messagesToSend);
+		int messagesToSend = Producer.DEFAULT_MSG_COUNT;
+		int producerThreads = Producer.DEFAULT_PRODUCER_THREADS;
+		int expectedConnections = Producer.DEFAULT_EXPECTED_CONNECTIONS;
+		producer = new Producer(messagesToSend, expectedConnections, producerThreads);
 		inetSocketAddress = new InetSocketAddress(Producer.DEFAULT_PORT);
 		producer.bind(inetSocketAddress);
 
@@ -43,21 +39,21 @@ public class MaxScheduledBytesIT {
 	public void testCorrectnessOfScheduledWriteMessages() throws IOException, InterruptedException, ExecutionException {
 		producer.setAssertCorrectnessOfScheduledWriteMessages(true);
 		LOGGER.info("Assert Correctness Of ScheduledWriteMessages : {}", producer.isAssertCorrectnessOfScheduledWriteMessages());
-		connectConsumerAndEvaluate();
+		try {
+			connectConsumerAndEvaluate();
+		} catch (Exception e) {
+			LOGGER.error("Exception in testCorrectnessOfScheduledWriteMessages",e);
+			throw e;
+		}
 	}
 
 	private void connectConsumerAndEvaluate() throws UnknownHostException, InterruptedException, ExecutionException {
 		LOGGER.info("Listening on port {}", inetSocketAddress.getPort());
 		Consumer consumer = new Consumer();
 		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), inetSocketAddress.getPort()));
-		consumer.write("Hello");
-		boolean isCompleted = producer.awaitCompletion(deadLine, deadLineTimeUnit);
-		LOGGER.info("Is Completed ? [{}]", isCompleted);
-		boolean isSuccessful = producer.stop();
+		consumer.write(Producer.HELLO);
+		boolean isSuccessful = producer.awaitCompletion();
 		LOGGER.info("Status [{}]" , isSuccessful == true ? "Success" :"Fail");
-		assertTrue(isCompleted);
-		producer.stop();
-		boolean isTaskSuccessful = producer.stop();;
-		assertTrue(isTaskSuccessful);
+		assertTrue(isSuccessful);
 	}
 }
