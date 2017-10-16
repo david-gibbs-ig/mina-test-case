@@ -16,13 +16,16 @@ public class MaxScheduledBytesIT {
 	private static Logger LOGGER = LoggerFactory.getLogger(MaxScheduledBytesIT.class);
 	private Producer producer;
 	private InetSocketAddress inetSocketAddress;
+	private int expectedConnections;
 	
 	@Before
 	public void setUp() throws Exception {
-		int messagesToSend = Producer.DEFAULT_MSG_COUNT;
+		expectedConnections = 3;
 		int producerThreads = Producer.DEFAULT_PRODUCER_THREADS;
-		int expectedConnections = Producer.DEFAULT_EXPECTED_CONNECTIONS;
-		producer = new Producer(messagesToSend, expectedConnections, producerThreads);
+		int tasks = Producer.DEFAULT_NUMBER_TASKS;
+		int messagesToSend = Producer.DEFAULT_MSG_COUNT;
+
+		producer = new Producer(expectedConnections, producerThreads, tasks, messagesToSend);
 		inetSocketAddress = new InetSocketAddress(Producer.DEFAULT_PORT);
 		producer.bind(inetSocketAddress);
 
@@ -49,9 +52,11 @@ public class MaxScheduledBytesIT {
 
 	private void connectConsumerAndEvaluate() throws UnknownHostException, InterruptedException, ExecutionException {
 		LOGGER.info("Listening on port {}", inetSocketAddress.getPort());
-		Consumer consumer = new Consumer();
-		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), inetSocketAddress.getPort()));
-		consumer.write(Producer.HELLO);
+		for (int i = 0; i < this.expectedConnections; ++i) {
+			Consumer consumer = new Consumer();
+			consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), inetSocketAddress.getPort()));
+			consumer.write(Producer.HELLO);
+		}
 		boolean isSuccessful = producer.awaitCompletion();
 		LOGGER.info("Status [{}]" , isSuccessful == true ? "Success" :"Fail");
 		assertTrue(isSuccessful);

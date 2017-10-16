@@ -1,10 +1,10 @@
-<configuration>
+<configuration debug="true">
 
 	<appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
 		<!-- encoders are assigned the type ch.qos.logback.classic.encoder.PatternLayoutEncoder 
 			by default -->
 		<encoder>
-			<pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+			<pattern>%date %level %logger{36} - %msg%n</pattern>
 		</encoder>
 		<filter class="ch.qos.logback.classic.filter.ThresholdFilter">
         	<level>INFO</level>
@@ -15,15 +15,7 @@
 		<file>./target/logs/mina-test-consumer.txt</file>
 		<append>false</append>
 		<encoder>
-			<pattern>%date %level [%thread] %logger{10} [%file:%line] %msg%n</pattern>
-		</encoder>
-	</appender>
-	
-	<appender name="PRODUCER-FILE" class="ch.qos.logback.core.FileAppender">
-		<file>./target/logs/mina-test-producer.txt</file>
-		<append>false</append>
-		<encoder>
-			<pattern>%date %level [%thread] %logger{10} [%file:%line] %msg%n</pattern>
+			<pattern>%date %level [%thread] %logger{36} [%file:%line] %msg%n</pattern>
 		</encoder>
 	</appender>
 	
@@ -32,15 +24,6 @@
    		 <appender-ref ref="STDOUT" />
 	</logger>
 	
-	<logger name="Producer" additivity="false" level="debug">
-   		 <appender-ref ref="PRODUCER-FILE"/>
-   		 <appender-ref ref="STDOUT" />
-	</logger>
-	
-	<logger name="quickfix.mina.message.FIXMessageDecoder" additivity="false" level="debug">
-   		 <appender-ref ref="CONSUMER-FILE"/>
-	</logger>
-
 	<root level="debug">
 		<appender-ref ref="STDOUT" />
 	</root>

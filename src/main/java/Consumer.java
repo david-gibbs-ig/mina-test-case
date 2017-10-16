@@ -36,6 +36,9 @@ import org.apache.mina.transport.socket.nio.NioSocketConnector;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.joran.JoranConfigurator;
+
 /**
  *
  * @author <a href="http://mina.apache.org">Apache MINA Project</a>
@@ -111,6 +114,13 @@ public class Consumer {
 	}
 
 	public static void main(String[] args) throws Exception {
+		LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+		JoranConfigurator configurator = new JoranConfigurator();
+		configurator.setContext(context);
+		// Call context.reset() to clear any previous configuration, e.g. default
+		// configuration. For multi-step configuration, omit calling context.reset().
+		context.reset();
+		configurator.doConfigure("./src/main/resources/logback-consumer.xml");
 		Consumer consumer = new Consumer();
 		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), Producer.DEFAULT_PORT));
 		consumer.write(Producer.HELLO);

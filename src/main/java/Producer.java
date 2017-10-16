@@ -48,6 +48,10 @@ import org.apache.mina.transport.socket.nio.NioSocketAcceptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.LoggerContext;
+import ch.qos.logback.classic.joran.JoranConfigurator;
+import ch.qos.logback.core.joran.spi.JoranException;
+
 /**
  *
  * @author <a href="http://mina.apache.org">Apache MINA Project</a>
@@ -55,7 +59,8 @@ import org.slf4j.LoggerFactory;
 public class Producer {
 	public static final int DEFAULT_PORT = 1234;
 	public static final int DEFAULT_MSG_COUNT = 100000;
-	public static final int DEFAULT_PRODUCER_THREADS = 3;
+	public static final int DEFAULT_NUMBER_TASKS = 3;
+	public static final int DEFAULT_PRODUCER_THREADS = 5;
 	public static final int DEFAULT_EXPECTED_CONNECTIONS = 1;
 	public static final String GOODBYE = "GoodBye";
 	public static final String HELLO = "Hello";
@@ -82,12 +87,13 @@ public class Producer {
 	private int numberOfTasks;
 	private final int expectedConnections;
 	
-	public Producer(int messagesToSend, int expectedConnections, int numberOfTasks) {
-		this.messagesToSend = messagesToSend;
+	public Producer(int expectedConnections, int numberOfThreads, int numberOfTasks, int messagesToSend ) {
 		//number of tasks (per request for data)
 		this.numberOfTasks = numberOfTasks;
+		//messages
+		this.messagesToSend = messagesToSend;
 		//one thread per number of tasks
-		this.execService = Executors.newFixedThreadPool(this.numberOfTasks);
+		this.execService = Executors.newFixedThreadPool(numberOfThreads);
 		this.expectedConnections = expectedConnections;
 		this.acceptor.setCloseOnDeactivation(false);
 		ProtocolCodecFilter fixCodecFilter = new ProtocolCodecFilter(new TextLineCodecFactory());
@@ -372,13 +378,22 @@ public class Producer {
 		}
 	}
 	
-	public static void main(String[] args) throws IOException, InterruptedException, ExecutionException {
+	public static void main(String[] args) throws IOException, InterruptedException, ExecutionException, JoranException {
+		LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
+		JoranConfigurator configurator = new JoranConfigurator();
+		configurator.setContext(context);
+		// Call context.reset() to clear any previous configuration, e.g. default
+		// configuration. For multi-step configuration, omit calling context.reset().
+		context.reset();
+		configurator.doConfigure("./src/main/resources/logback-producer.xml");		
 		boolean isSuccessful = false;
 		try {
-			int tasks = Producer.DEFAULT_PRODUCER_THREADS;
-			int msgCount = Producer.DEFAULT_MSG_COUNT;
+			LOGGER.info("Starting.");
 			int expectedConnections = Producer.DEFAULT_EXPECTED_CONNECTIONS;
-			Producer producer = new Producer(msgCount,expectedConnections,tasks);
+			int threads = Producer.DEFAULT_PRODUCER_THREADS;
+			int tasks = Producer.DEFAULT_NUMBER_TASKS;
+			int msgCount = Producer.DEFAULT_MSG_COUNT;
+			Producer producer = new Producer(expectedConnections,threads,tasks,msgCount);
 			producer.setAssertCorrectnessOfScheduledWriteMessages(false);
 			LOGGER.info("Assert Correctness Of ScheduledWriteMessages : {}", producer.isAssertCorrectnessOfScheduledWriteMessages());
 			producer.bind(new InetSocketAddress(DEFAULT_PORT));
