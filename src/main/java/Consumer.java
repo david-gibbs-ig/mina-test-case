@@ -98,8 +98,8 @@ public class Consumer {
 			++receivedMessages;
 			this.totalMessages.increment();
 			LOGGER.debug("received : {}, Msg Number {}", message, receivedMessages );
-			if (message.toString().contains(Producer.GOODBYE)) {
-				LOGGER.info("{} received, closing session", Producer.GOODBYE);
+			if (message.toString().contains(ProducerProtocolHandler.GOODBYE)) {
+				LOGGER.info("{} received, closing session", ProducerProtocolHandler.GOODBYE);
 				LOGGER.info("{} messages received", this.totalMessages);
 				session.closeNow();
 				this.connector.dispose();
@@ -113,6 +113,11 @@ public class Consumer {
 		}
 	}
 
+	/**
+	 * Run from root directory of the project
+	 * @param args
+	 * @throws Exception
+	 */
 	public static void main(String[] args) throws Exception {
 		LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
 		JoranConfigurator configurator = new JoranConfigurator();
@@ -123,7 +128,7 @@ public class Consumer {
 		configurator.doConfigure("./src/main/resources/logback-consumer.xml");
 		Consumer consumer = new Consumer();
 		consumer.connect(new InetSocketAddress(InetAddress.getLocalHost(), Producer.DEFAULT_PORT));
-		consumer.write(Producer.HELLO);
+		consumer.write(ProducerProtocolHandler.HELLO);
 	}
 
 }
